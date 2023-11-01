@@ -7,92 +7,130 @@ from brainpy.types import ArrayType
 class DecoModel(bp.DynamicalSystemNS):
     def __init__(
     self,
-    size,
-    tau_S: Union[float, ArrayType] = 0.1,
+    size: int,
+    struc_conn_matrix: ArrayType,
+    batch_size: int = 1,
     gamma: float = 0.641,
     J: float = 0.2609,
-    I_0: Union[float, ArrayType] = None, 
-    G: float = 1, # trainable
-    w: Union[float, ArrayType] = 0.9, 
-    struc_conn_matrix: ArrayType = None,
-    S_init = None,
-    H_x_init = None,
-    batch_size = 1,
-    LFP_a = None,
-    LFP_b = None,
+    tau_S: Union[float, ArrayType] = 0.1,
+    G: float = 1.0, # trainable
+    w: Union[float, ArrayType] = 0.9, # trainable
+    I: Union[float, ArrayType] = None, # trainable
+    out_scale_a: float = None, # trainable
+    out_scale_b: float = None, # trainable
+    H_x_act = 'Softplus', 
+    out_act = 'linear', 
+    S_init: Union[float, ArrayType] = None,
+    H_init: Union[float, ArrayType] = None,
     ):
+    '''
+    reduced-wang-wong-deco model using BrainPy 
+    written by Xiaoyu Chen(chenxy_sjtu@sjtu.edu.cn) and Yixiao Feng() 2023-11
+
     
+    '''
+
         super(DecoModel, self).__init__()
         
+
         #>>> Model setted parameters:
         self.num = size
-        self.tau_S = tau_S
+        self.struc_conn_matrix = bm.asarray(struc_conn_matrix)
         self.gamma = gamma
         self.J = J
-        self.struc_conn_matrix = bm.asarray(struc_conn_matrix)
-        
-        #>>> activation func
-        self.H_x_act = bp.dnn.Softplus(beta=0.154, threshold=1e12 )
+        self.tau_S = tau_S
+
         
         #>>> Trainable weights
         self.G = bm.TrainVar(G)
         
-        if isinstance(w, float):
-            w = w * bm.ones(self.num)
+
+        if w is None:
+            self.w = 0.0
+        elif isinstance(w, float):
+            self.w = bm.TrainVar(w * bm.ones(self.num)) # (num,)
+        else:
             self.w = bm.TrainVar(w) # (num,)
-        
-        if I_0 is None:
-            self.I_0 = 0.0
+
+
+        if I is None:
+            self.I = 0.0
+        elif isinstance(I, float):
+            self.I = bm.TrainVar(I * bm.ones(self.num)) # (num,)
         else:
-            if isinstance(I_0, float):
-                I_0 = I_0 * bm.ones(self.num)
-                self.I_0 = bm.TrainVar(I_0) # (num,)
-        
-        if LFP_a is None:
-            self.LFP_a = 1
+            self.I = bm.TrainVar(I) # (num,)
+
+
+        if out_scale_a is None:
+            self.out_scale_a = 1.0
         else:
-            self.LFP_a = bm.TrainVar(LFP_a)
+            self.out_scale_a = bm.TrainVar(out_scale_a)
         
         
-        if LFP_b is None:
-            self.LFP_b = 0
+        if out_scale_b is None:
+            self.out_scale_b = 0.0
         else:
-            self.LFP_b = bm.TrainVar(LFP_b)
+            self.out_scale_b = bm.TrainVar(out_scale_b)
         
         
+        #>>> activation func
+        if callable(H_x_act):
+            self.H_x_act = H_x_act
+        elif H_x_act == 'Softplus':
+            self.H_x_act = lambda x: bp.dnn.Softplus(beta=0.154, threshold=1e12)(270*x-108)
+        elif H_x_act == 'AbbottChance':
+            self.H_x_act = lambda x: bm.nan_to_num( (270*x-108)/(1-bm.exp(-0.154*(270*x-108))) )
+
+        if out_act == 'linear':
+            self.out_act = lambda x: bm.multiply(self.out_scale_a, x) + self.out_scale_b
+            # if 1*x+0, then no scaling conversion
+        elif out_act == 'Balloon':
+            pass # 
+
+
         #>>> Variables:
-        if S_init is not None:
+        if S_init is None:
+            self.S_init = bm.zeros(self.num)
+        elif isinstance(S_init, float):
+            self.S_init = bm.asarray(S_init * bm.ones(self.num))
+        else:
             self.S_init = bm.asarray(S_init)
-        else:
-            self.S_init = 0.0
         
-        if H_x_init is not None:
-            self.H_x_init = bm.asarray(H_x_init)
-        else:
-            self.H_x_init = 0.0
         
-        self.S   = bm.Variable(self.S_init*bm.ones((batch_size,self.num)), batch_axis = 0) 
-        self.H_x = bm.Variable(self.H_x_init*bm.ones((batch_size,self.num)), batch_axis = 0) 
+        if H_init is None:
+            self.H_init = bm.zeros(self.num)
+        elif isinstance(H_init, float):
+            self.H_init = bm.asarray(H_init * bm.ones(self.num))
+        else:
+            self.H_init = bm.asarray(H_init)
+        
+
+        self.S = bm.Variable(self.S_init*bm.ones((batch_size,self.num)), batch_axis = 0) 
+        self.H = bm.Variable(self.H_init*bm.ones((batch_size,self.num)), batch_axis = 0) 
     
     
     def reset_state(self, batch_size=1): # this function defines how to reset the mode states
-        self.S.value   = self.S_init*bm.ones((batch_size,self.num))
-        self.H_x.value = self.H_x_init*bm.ones((batch_size,self.num))
+        self.S.value = self.S_init*bm.ones((batch_size,self.num))
+        self.H.value = self.H_init*bm.ones((batch_size,self.num))
     
-    def update(self, stim = 0):
-        # update S based on H_x
-        self.S.value = self.S + ( -1 / self.tau_S * self.S + self.gamma * (1-self.S) * self.H_x) * bm.dt + stim
+    def reset_init(self,):
+        self.S_init.value = bm.mean(self.S,axis=0)
+        self.H_init.value = bm.mean(self.H,axis=0)
+
+    def update(self, inp = 0):
+        # update S based on H and input
+        self.S.value = self.S + ( -1 / self.tau_S * self.S + self.gamma * (1-self.S) * self.H) * bm.dt + inp
         
-        # hard sigmoid
+        # hard sigmoid of S
         self.S.value = bm.minimum(bm.maximum(self.S, 0), 1)
         
-        # input x based on S
-        x = self.J * bm.multiply(self.w, self.S) + self.J * self.G * bm.matmul(self.S , self.struc_conn_matrix) + self.I_0 # + stim
+        # summary x based on S
+        x = self.J * bm.multiply(self.w, self.S) + self.J * self.G * bm.matmul(self.S , self.struc_conn_matrix) + self.I
         
-        # firing rate H_x based on x
-        self.H_x.value = self.H_x_act(270*x-108) 
+        # get firing rate H(x) based on its input x
+        self.H.value = self.H_x_act(x) 
         
-        # firing rate to LFP
-        LFP = bm.multiply(self.LFP_a, self.S) + self.LFP_b # if 1*x+0, then no LFP conversion
-    
-        return LFP
+        # get output
+        out = self.out_act(self.S)
+
+        return out
