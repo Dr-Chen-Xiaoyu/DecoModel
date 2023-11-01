@@ -23,12 +23,10 @@ class DecoModel(bp.DynamicalSystemNS):
     S_init: Union[float, ArrayType] = None,
     H_init: Union[float, ArrayType] = None,
     ):
-    '''
-    reduced-wang-wong-deco model using BrainPy 
-    written by Xiaoyu Chen(chenxy_sjtu@sjtu.edu.cn) and Yixiao Feng(newtonpula@sjtu.edu.cn) in 2023-11
-
-    
-    '''
+        '''
+        reduced-wang-wong-deco model using BrainPy 
+        written by Xiaoyu Chen(chenxy_sjtu@sjtu.edu.cn) and Yixiao Feng(newtonpula@sjtu.edu.cn) in 2023-11
+        '''
 
         super(DecoModel, self).__init__()
         
