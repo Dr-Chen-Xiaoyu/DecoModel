@@ -25,7 +25,7 @@ class DecoModel(bp.DynamicalSystemNS):
     ):
     '''
     reduced-wang-wong-deco model using BrainPy 
-    written by Xiaoyu Chen(chenxy_sjtu@sjtu.edu.cn) and Yixiao Feng() 2023-11
+    written by Xiaoyu Chen(chenxy_sjtu@sjtu.edu.cn) and Yixiao Feng(newtonpula@sjtu.edu.cn) in 2023-11
 
     
     '''
