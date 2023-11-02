@@ -77,7 +77,7 @@ class DecoModel(bp.DynamicalSystemNS):
         elif H_x_act == 'Softplus':
             self.H_x_act = lambda x: bp.dnn.Softplus(beta=0.154, threshold=1e12)(270*x-108)
         elif H_x_act == 'AbbottChance':
-            self.H_x_act = lambda x: bm.nan_to_num( (270*x-108)/(1-bm.exp(-0.154*(270*x-108))) )
+            self.H_x_act = lambda x: bm.nan_to_num( (270*x-108)/(1-bm.exp(-0.154*(270*x-108))), nan = 1/0.154 )
 
         if out_act == 'linear':
             self.out_act = lambda x: bm.multiply(self.out_scale_a, x) + self.out_scale_b
@@ -108,15 +108,22 @@ class DecoModel(bp.DynamicalSystemNS):
     
     
     def reset_state(self, batch_size=1): # this function defines how to reset the mode states
-        self.S.value = self.S_init*bm.ones((batch_size,self.num))
-        self.H.value = self.H_init*bm.ones((batch_size,self.num))
+        if self.S_init is None:
+            self.S.value[:] = 0
+        else:
+            self.S.value = self.S_init*bm.ones((batch_size,self.num))
+
+        if self.H_init is None:
+            self.H.value[:] = 0
+        else:
+            self.H.value = self.H_init*bm.ones((batch_size,self.num))
     
     def reset_init(self,):
         self.S_init.value = bm.mean(self.S,axis=0)
         self.H_init.value = bm.mean(self.H,axis=0)
 
     def update(self, inp = 0):
-        # update S based on H and input
+        # update S based on H and input, noise is integrated into the input
         self.S.value = self.S + ( -1 / self.tau_S * self.S + self.gamma * (1-self.S) * self.H) * bm.dt + inp
         
         # hard sigmoid of S
