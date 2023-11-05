@@ -120,49 +120,6 @@ class DecoModel(bp.DynamicalSystemNS):
         
         return self.S
 
-class convLayer(bp.DynamicalSystemNS):
-    def __init__(
-        self,
-        struc_conn_matrix: ArrayType,
-        J: float = 0.2609,
-        G: float = 1.0,
-        w: Union[float, ArrayType] = 0.9,
-        I: Union[float, ArrayType] = 0.0,
-    ):
-        super(convLayer, self).__init__()
-
-        self.struc_conn_matrix = bm.asarray(struc_conn_matrix)
-        self.J = J
-        self.G = G
-        self.w = w
-        self.I = I
-
-    def update(self, S = 0):
-        x = self.J * bm.multiply(self.w, S) + self.J * self.G * bm.matmul(S , self.struc_conn_matrix) + self.I
-
-        return x
-
-class actLayer(bp.DynamicalSystemNS):
-    def __init__(
-        self,
-        act: Union[callable, str] = 'AbbottChance',
-    ):
-        super(actLayer, self).__init__()
-
-        self.act = act
-
-    def update(self, inp = 0):
-        if callable(self.act):
-            return self.act(inp)
-        elif self.act == 'AbbottChance':
-            return bm.nan_to_num((270 * inp - 108) / (1 - bm.exp(-0.154 * (270 * inp - 108))), nan = 1 / 0.154)
-        elif self.act == 'Softplus':
-            return bp.dnn.Softplus(beta = 0.154, threshold = 1e12)(270 * inp - 108)
-        else:
-            raise ValueError('act must be callable or "AbbottChance" or "Softplus"')
-
-# the following model imitates the structure of RNN, but seems dumb
-
 class DecoModel_v1(bp.DynamicalSystemNS):
     def __init__(
         self, 
@@ -177,19 +134,18 @@ class DecoModel_v1(bp.DynamicalSystemNS):
         I: Union[float, ArrayType] = 0.0, 
         H_x_act = 'AbbottChance', 
         S_init: Union[float, ArrayType] = None,
-        H_init: Union[float, ArrayType] = None,
-        train: list = ['G', 'w', 'I']
+        train: list = ['G', 'w', 'I'],
+        method = 'euler',
     ):
         super(DecoModel_v1, self).__init__()
 
-        self.num = size 
+        #>>> fixed parameters:
+        self.num = size # network size (# of node)
+        self.struc_conn_matrix = bm.asarray(struc_conn_matrix) # (num,num)
         self.gamma = gamma
+        self.J = J
         
-
-        self.actLayer = actLayer(act = H_x_act)
-        self.convLayer = convLayer(struc_conn_matrix = struc_conn_matrix, J = J, G = G, w = w, I = I)
-
-                #>>> time constant of S
+        #>>> time constant of S
         if 'tau_S' in train:
             if isinstance(tau_S, float):
                 self.tau_S = bm.TrainVar(tau_S * bm.ones(self.num)) # (num,) with same initialization
@@ -221,6 +177,14 @@ class DecoModel_v1(bp.DynamicalSystemNS):
                 self.I = bm.TrainVar(I) # (1,) or (num,)
         else:
             self.I = I # float or (1,) (num,) bm.array
+
+        #>>> activation function
+        if callable(H_x_act):
+            self.H_x_act = H_x_act
+        elif H_x_act == 'Softplus':
+            self.H_x_act = lambda x: bp.dnn.Softplus(beta = 0.154, threshold = 1e12)(270 * x - 108)
+        elif H_x_act == 'AbbottChance':
+            self.H_x_act = lambda x: bm.nan_to_num((270 * x - 108) / (1 - bm.exp(-0.154 * (270 * x - 108))) , nan = 1 / 0.154 )
         
         #>>> initial values
         if S_init is None:
@@ -229,24 +193,30 @@ class DecoModel_v1(bp.DynamicalSystemNS):
             self.S_init = bm.asarray(S_init * bm.ones(self.num))
         else:
             self.S_init = bm.asarray(S_init)
-        
-        if H_init is None:
-            self.H_init = bm.zeros(self.num)
-        elif isinstance(H_init, float):
-            self.H_init = bm.asarray(H_init * bm.ones(self.num))
-        else:
-            self.H_init = bm.asarray(H_init)
 
         #>>> variables
         self.S = bm.Variable(self.S_init*bm.ones((batch_size,self.num)), batch_axis = 0) 
-        self.H = bm.Variable(self.H_init * bm.ones((batch_size,self.num)), batch_axis = 0) 
+
+        #>>> functions
+        self.int_S = bp.odeint(self.dS, method = method)
+
+    def dS(self, S, t):
+        x = self.J * bm.multiply(self.w, self.S) + self.J * self.G * bm.matmul(self.S , self.struc_conn_matrix) + self.I
+        dS = - self.S / self.tau_S + self.gamma * (1-self.S) * self.H_x_act(x)
+        return dS
 
     def reset_state(self, batch_size=1): # this function defines how to reset the mode states
         self.S.value = self.S_init * bm.ones((batch_size,self.num))
 
-    def update(self, S = 0, inp = 0):
-        H = self.actLayer(self.convLayer(S))
-        return S + (- S / self.tau_S + self.gamma * (1 - S) * H) * bm.dt + inp
+    def reset_init(self,):
+        self.S_init.value = bm.mean(self.S,axis=0)   
+
+    def update(self, inp = 0):
+        t = bp.share['t']
+        self.S.value = self.int_S(self.S, t) + inp
+        self.S.value = bm.minimum(bm.maximum(self.S, 0), 1)
+        return self.S
+        
 
 class outLinear(bp.DynamicalSystemNS):
     def __init__(
