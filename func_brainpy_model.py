@@ -34,7 +34,7 @@ class DecoModel(bp.DynamicalSystemNS):
         TrainVar_list = ['G','w','I'],
         H_x_act: Union[str, callable] = 'Softplus', # or 'AbbottChance' or some callable activation function
         S_init: Union[float, ArrayType] = None, # initial S
-        H_init: Union[float, ArrayType] = None, # initial H
+        H_init: Union[float, ArrayType] = None, # initial H (firing rate)
     ):
         
 
