@@ -1,3 +1,8 @@
+'''
+BrainPy Models written by Xiaoyu Chen(chenxy_sjtu@sjtu.edu.cn) and Yixiao Feng(newtonpula@sjtu.edu.cn) in 2023-11-03
+'''
+
+
 import brainpy as bp
 import brainpy.math as bm
 from typing import Union
@@ -5,29 +10,32 @@ from brainpy.types import ArrayType
 
 
 class DecoModel(bp.DynamicalSystemNS):
+    """
+    reduced-wong-wang-deco model using BrainPy 
+
+    tau_S, w and I should be float or (1,) or (num,) bm.array, if float then it will be initialized as float*(num,) bm.array
+    TrainVar_list should be a list such as ['tau_S','G','w','I'] to specify if this parameter is trainable
+    
+    S_init and H_init should be float or (num,) bm.array, if float then it will be initialized as float*(num,) bm.array
+    S(gating state of model) and H(firing rate) will be initialized by S_init and H_init into (batch_size,num) with broadcasting along batch axis  
+
+    """
     def __init__(
-    self,
-    size: int,
-    struc_conn_matrix: ArrayType,
-    batch_size: int = 1,
-    gamma: float = 0.641,
-    J: float = 0.2609,
-    tau_S: Union[float, ArrayType] = 0.1,
-    tau_S_trainable: bool = False,
-    G: float = 1.0, 
-    G_trainable: bool = True,
-    w: Union[float, ArrayType] = 0.9, 
-    w_trainable: bool = True,
-    I: Union[float, ArrayType] = 0.0, 
-    I_trainable: bool = True,
-    H_x_act = 'Softplus', 
-    S_init: Union[float, ArrayType] = None,
-    H_init: Union[float, ArrayType] = None,
+        self,
+        size: int,
+        struc_conn_matrix: ArrayType,
+        batch_size: int = 1,
+        gamma: float = 0.641, # kinetic parameter
+        J: float = 0.2609, # synaptic coupling
+        tau_S: Union[float, ArrayType] = 0.1, # time constant
+        G: float = 1.0, # global coupling weight
+        w: Union[float, ArrayType] = 0.9, # recurrent weights
+        I: Union[float, ArrayType] = 0.0, # background inputs (intercepts)
+        TrainVar_list = ['G','w','I'],
+        H_x_act = 'Softplus', # or 'AbbottChance' or some callable activation function
+        S_init: Union[float, ArrayType] = None, # initial S
+        H_init: Union[float, ArrayType] = None, # initial H
     ):
-        """
-        reduced-wong-wang-deco model using BrainPy 
-        written by Xiaoyu Chen(chenxy_sjtu@sjtu.edu.cn) and Yixiao Feng(newtonpula@sjtu.edu.cn) in 2023-11-03
-        """
         
 
         super(DecoModel, self).__init__()
@@ -41,7 +49,7 @@ class DecoModel(bp.DynamicalSystemNS):
         
 
         #>>> Trainable weights
-        if tau_S_trainable:
+        if 'tau_S' in TrainVar_list:
             if isinstance(tau_S, float):
                 self.tau_S = bm.TrainVar(tau_S * bm.ones(self.num)) # (num,) with same initialization
             else:
@@ -49,12 +57,12 @@ class DecoModel(bp.DynamicalSystemNS):
         else:
             self.tau_S = tau_S # float or (1,) (num,) bm.array
 
-        if G_trainable:
+        if 'G' in TrainVar_list:
             self.G = bm.TrainVar(G)
         else:
             self.G = G # float
         
-        if w_trainable:
+        if 'w' in TrainVar_list:
             if isinstance(w, float):
                 self.w = bm.TrainVar(w * bm.ones(self.num)) # (num,) with same initialization
             else:
@@ -62,7 +70,7 @@ class DecoModel(bp.DynamicalSystemNS):
         else:
             self.w = w # float or (1,) (num,) bm.array
 
-        if I_trainable:
+        if 'I' in TrainVar_list:
             if isinstance(I, float):
                 self.I = bm.TrainVar(I * bm.ones(self.num)) # (num,) with same initialization
             else:
@@ -86,7 +94,7 @@ class DecoModel(bp.DynamicalSystemNS):
         elif isinstance(S_init, float):
             self.S_init = bm.asarray(S_init * bm.ones(self.num))
         else:
-            self.S_init = bm.asarray(S_init)
+            self.S_init = bm.asarray(S_init) # (num,)
         
 
         if H_init is None:
@@ -94,7 +102,7 @@ class DecoModel(bp.DynamicalSystemNS):
         elif isinstance(H_init, float):
             self.H_init = bm.asarray(H_init * bm.ones(self.num))
         else:
-            self.H_init = bm.asarray(H_init)
+            self.H_init = bm.asarray(H_init) # (num,)
         
 
         self.S = bm.Variable(self.S_init*bm.ones((batch_size,self.num)), batch_axis = 0) 
@@ -118,7 +126,7 @@ class DecoModel(bp.DynamicalSystemNS):
         # hard sigmoid of S
         self.S.value = bm.minimum(bm.maximum(self.S, 0), 1)
         
-        # summary x based on S
+        # get x based on S
         x = self.J * bm.multiply(self.w, self.S) + self.J * self.G * bm.matmul(self.S , self.struc_conn_matrix) + self.I
         
         # get firing rate H(x) based on its input x
@@ -129,20 +137,19 @@ class DecoModel(bp.DynamicalSystemNS):
 
 
 class outLinear(bp.DynamicalSystemNS):
+    '''
+    Output-linear-scalling-layer of S from RNN-layer DecoModel
+    size = num, i.e., number of network size (# of node)
+    a or b must be float or bm.array with (1,) or (num,) shape
+    if a or b is float, then set (num,) paramters with same initialization such as [a,a,a,a,....]
+    if a or b is None, then it will not be included in scalling
+    '''
     def __init__(
         self,
         size: int,
         a: Union[float, ArrayType] = None, # trainable
         b: Union[float, ArrayType] = None, # trainable
-        ):
-
-        '''
-        Output-linear-scalling-layer of S from RNN-layer DecoModel
-        size = num, i.e., number of network size (# of node)
-        a or b must be float or bm.array with (1,) or (num,) shape
-        if a or b is float, then set (num,) paramters with same initialization such as [a,a,a,a,....]
-        if a or b is None, then it will not be included in scalling
-        '''
+    ):
 
         super(outLinear, self).__init__()
 
@@ -162,4 +169,5 @@ class outLinear(bp.DynamicalSystemNS):
 
     def update(self, inp = 0):
         return bm.multiply(self.a, inp) + self.b
+
 
