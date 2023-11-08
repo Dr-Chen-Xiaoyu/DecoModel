@@ -32,9 +32,9 @@ class DecoModel(bp.DynamicalSystemNS):
         w: Union[float, ArrayType] = 0.9, # recurrent weights
         I: Union[float, ArrayType] = 0.0, # background inputs (intercepts)
         TrainVar_list = ['G','w','I'],
-        H_x_act = 'Softplus', # or 'AbbottChance' or some callable activation function
+        H_x_act: Union[str, callable] = 'Softplus', # or 'AbbottChance' or some callable activation function
         S_init: Union[float, ArrayType] = None, # initial S
-        H_init: Union[float, ArrayType] = None, # initial H
+        H_init: Union[float, ArrayType] = None, # initial H (firing rate)
     ):
         
 
