@@ -5,7 +5,7 @@ BrainPy Models written by Xiaoyu Chen(chenxy_sjtu@sjtu.edu.cn) and Yixiao Feng(n
 
 import brainpy as bp
 import brainpy.math as bm
-from typing import Union
+from typing import Union,Callable
 from brainpy.types import ArrayType
 
 
@@ -32,7 +32,7 @@ class DecoModel(bp.DynamicalSystemNS):
         w: Union[float, ArrayType] = 0.9, # recurrent weights
         I: Union[float, ArrayType] = 0.0, # background inputs (intercepts)
         TrainVar_list = ['G','w','I'],
-        H_x_act: Union[str, callable] = 'Softplus', # or 'AbbottChance' or some callable activation function
+        H_x_act: Union[str, Callable] = 'Softplus', # or 'AbbottChance' or some callable activation function
         S_init: Union[float, ArrayType] = None, # initial S
         H_init: Union[float, ArrayType] = None, # initial H (firing rate)
     ):
