@@ -85,8 +85,8 @@ class DecoModel(bp.DynamicalSystemNS):
             self.H_x_act = H_x_act
         elif H_x_act == 'Softplus':
             self.H_x_act = lambda x: bp.dnn.Softplus(beta=0.154, threshold=1e12)(270*x-108)
-        elif H_x_act == 'AbbottChance':
-            self.H_x_act = vmap(vmap(AbbottChance, out_axes=0, in_axes=0), out_axes=0, in_axes=0)
+        elif H_x_act == 'AbbottChance': # the original AbbottChance
+            self.H_x_act = lambda x: bm.nan_to_num( (270*x-108)/(1-bm.exp(-0.154*(270*x-108))) , nan = 1/0.154 )
 
 
         #>>> Variables:
@@ -135,14 +135,17 @@ class DecoModel(bp.DynamicalSystemNS):
         
         return self.S
 
-def AbbottChance(x, a=270, b=108, d=0.154):
-    H_x = bm.ifelse(bm.abs(x - b / a) <= 1e-7, operands = x,
-        branches = (
-            lambda x: a / 2 * x - b / 2 + 1 / d,
+def AbbottChance(inp, a=270, b=108, d=0.154, epsilon=1e-7):
+    x=a*input-b
+    out = bm.ifelse( 
+        bm.abs(x)<=epsilon, 
+        operands = x, 
+        branches = (lambda x: x / 2 + 1 / d,
+                    lambda x: x / (1 - bm.exp(-d * x)),)
+        )
+    return out
 
-            lambda x: (a * x - b) / (1 - bm.exp(-d * (a * x - b))),
-        ))
-    return H_x
+vmap(vmap(AbbottChance, out_axes=0, in_axes=0), out_axes=0, in_axes=0)
 
 class outLinear(bp.DynamicalSystemNS):
     '''
