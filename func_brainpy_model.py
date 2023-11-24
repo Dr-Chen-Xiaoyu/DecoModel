@@ -202,7 +202,7 @@ class outBalloon(bp.DynamicalSystemNS):
         super(outBalloon, self).__init__()
         '''
         Output-nonlinear-scalling-layer (Balloon dynamics) of S from RNN-layer DecoModel, i.e., turning postsynaptic gating variable S to BOLD signal in an element-wise fashion.
-        Balloon-Windkessel Hemodynamic model is used, equations with default parameters are from https://www.science.org/doi/10.1126/sciadv.aat7854
+        Balloon-Windkessel Hemodynamic model is used based on the codes from https://www.nature.com/articles/s41467-021-26704-y with equations and default parameters from https://www.science.org/doi/10.1126/sciadv.aat7854
         
         size = num, i.e., number of network size (# of node)
         '''
