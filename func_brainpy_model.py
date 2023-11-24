@@ -9,6 +9,16 @@ from jax import vmap
 from typing import Union,Callable
 from brainpy.types import ArrayType
 
+def AbbottChance(inp, a=270, b=108, d=0.154, epsilon=1e-7):
+    x=a*inp-b
+    out=bm.ifelse( 
+        bm.abs(x)<=epsilon, 
+        operands=x, 
+        branches=(lambda x: 0.5*x + 1/d,
+                  lambda x: x/(1 - bm.exp(-d*x)), )
+        )
+    return out
+    
 
 class DecoModel(bp.DynamicalSystemNS):
     """
@@ -33,7 +43,7 @@ class DecoModel(bp.DynamicalSystemNS):
         w: Union[float, ArrayType] = 0.9, # recurrent weights
         I: Union[float, ArrayType] = 0.0, # background inputs (intercepts)
         TrainVar_list = ['G','w','I'],
-        H_x_act: Union[str, Callable] = 'Softplus', # or 'AbbottChance' or some callable activation function
+        H_x_act: Union[str, Callable] = vmap(vmap(AbbottChance, out_axes=0, in_axes=0), out_axes=0, in_axes=0) # or 'Softplus' or 'AbbottChance' or other callable activation function
         S_init: Union[float, ArrayType] = None, # initial S
         H_init: Union[float, ArrayType] = None, # initial H (firing rate)
     ):
@@ -135,17 +145,6 @@ class DecoModel(bp.DynamicalSystemNS):
         
         return self.S
 
-def AbbottChance(inp, a=270, b=108, d=0.154, epsilon=1e-7):
-    x=a*input-b
-    out = bm.ifelse( 
-        bm.abs(x)<=epsilon, 
-        operands = x, 
-        branches = (lambda x: x / 2 + 1 / d,
-                    lambda x: x / (1 - bm.exp(-d * x)),)
-        )
-    return out
-
-vmap(vmap(AbbottChance, out_axes=0, in_axes=0), out_axes=0, in_axes=0)
 
 class outLinear(bp.DynamicalSystemNS):
     '''
