@@ -5,6 +5,7 @@ BrainPy Models written by Xiaoyu Chen(chenxy_sjtu@sjtu.edu.cn) and Yixiao Feng(n
 
 import brainpy as bp
 import brainpy.math as bm
+from jax import vmap
 from typing import Union,Callable
 from brainpy.types import ArrayType
 
@@ -85,7 +86,7 @@ class DecoModel(bp.DynamicalSystemNS):
         elif H_x_act == 'Softplus':
             self.H_x_act = lambda x: bp.dnn.Softplus(beta=0.154, threshold=1e12)(270*x-108)
         elif H_x_act == 'AbbottChance':
-            self.H_x_act = lambda x: bm.nan_to_num( (270*x-108)/(1-bm.exp(-0.154*(270*x-108))) , nan = 1/0.154 )
+            self.H_x_act = vmap(vmap(AbbottChance, out_axes=0, in_axes=0), out_axes=0, in_axes=0)
 
 
         #>>> Variables:
@@ -134,7 +135,14 @@ class DecoModel(bp.DynamicalSystemNS):
         
         return self.S
 
+def AbbottChance(x, a=270, b=108, d=0.154):
+    H_x = bm.ifelse(bm.abs(x - b / a) <= 1e-7, operands = x,
+        branches = (
+            lambda x: a / 2 * x - b / 2 + 1 / d,
 
+            lambda x: (a * x - b) / (1 - bm.exp(-d * (a * x - b))),
+        ))
+    return H_x
 
 class outLinear(bp.DynamicalSystemNS):
     '''
@@ -170,4 +178,63 @@ class outLinear(bp.DynamicalSystemNS):
     def update(self, inp = 0):
         return bm.multiply(self.a, inp) + self.b
 
+class outBalloon(bp.DynamicalSystemNS):
+    def __init__(
+        self,
+        size: int,
+        batch_size: int = 1,
+        p_constant: float = 0.34,
+        ):
+
+        super(outBalloon, self).__init__()
+        '''
+        Output-nonlinear-scalling-layer (Balloon dynamics) of S from RNN-layer DecoModel
+        
+        This function turns postsynaptic gating variable S to BOLD signal in an element-wise fashion.
+        
+        The Balloon-Windkessel Hemodynamic model is used. The equations and parameters are the same as in the paper:
+        https://www.science.org/doi/10.1126/sciadv.aat7854
+        
+        size = num, i.e., number of network size (# of node)
+
+        '''
+
+        self.F_0 = bm.Variable(0*bm.ones((batch_size,size)), batch_axis = 0) 
+        self.F_1 = bm.Variable(1*bm.ones((batch_size,size)), batch_axis = 0) 
+        self.F_2 = bm.Variable(1*bm.ones((batch_size,size)), batch_axis = 0) 
+        self.F_3 = bm.Variable(1*bm.ones((batch_size,size)), batch_axis = 0) 
+
+        self.p_constant = p_constant
+        self.v_0 = 0.02
+        self.k_1 = 4.3 * 28.265 * 3 * 0.0331 * p_constant
+        self.k_2 = 0.47 * 110 * 0.0331 * p_constant
+        self.k_3 = 0.53
+
+    def update(self,S=0):
+        '''
+        input   S:  batch_size*size matrix represents synaptic gating variable
+                batch_size is the number of batch
+                size is the number of nodes
+
+        output  S_BOLD: same shape matrix for BOLD signal output (element-wise Hemodynamic transformation)
+        '''
+                
+        # gating2bold_derivative：
+        dF_0 = S - 0.65 * self.F_0 - 0.41 * (self.F_1 -1)
+        dF_1 = self.F_0
+        dF_2 = 1 / 0.98 * (self.F_1 - self.F_2**3)
+        dF_3 = 1 / 0.98 * (self.F_1 / self.p_constant * (1-(1-self.p_constant)**(1/self.F_1)) - self.F_3 * self.F_2 ** 2)
+
+        # eular
+        self.F_0.value = self.F_0 + dF_0*bm.dt
+        self.F_1.value = self.F_1 + dF_1*bm.dt
+        self.F_2.value = self.F_2 + dF_2*bm.dt
+        self.F_3.value = self.F_3 + dF_3*bm.dt
+        
+        # caculate BOLD
+        v_t = self.F_2
+        q_t = self.F_3
+        
+        S_BOLD = 100 / self.p_constant * self.v_0 * (self.k_1 * (1 - q_t) + self.k_2 * (1 - q_t / v_t) + self.k_3 * (1 - v_t))
+        return S_BOLD
 
