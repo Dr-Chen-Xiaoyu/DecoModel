@@ -43,7 +43,7 @@ class DecoModel(bp.DynamicalSystemNS):
         w: Union[float, ArrayType] = 0.9, # recurrent weights
         I: Union[float, ArrayType] = 0.0, # background inputs (intercepts)
         TrainVar_list = ['G','w','I'],
-        H_x_act: Union[str, Callable] = vmap(vmap(AbbottChance, out_axes=0, in_axes=0), out_axes=0, in_axes=0) # or other callable activation function or 'Softplus' or 'AbbottChance'
+        H_x_act: Union[str, Callable] = vmap(vmap(AbbottChance, out_axes=0, in_axes=0), out_axes=0, in_axes=0), # or other callable activation function or 'Softplus' or 'AbbottChance'
         S_init: Union[float, ArrayType] = None, # initial S
         H_init: Union[float, ArrayType] = None, # initial H (firing rate)
     ):
@@ -249,5 +249,5 @@ class outBalloon(bp.DynamicalSystemNS):
         # caculate and return BOLD signal
         v_t = self.F_2
         q_t = self.F_3
-        return self.v_0 * (self.k_1 * (1 - q_t) + self.k_2 * (1 - q_t / v_t) + self.k_3 * (1 - v_t))
+        return 100/self.rou*self.v_0 * (self.k_1 * (1 - q_t) + self.k_2 * (1 - q_t / v_t) + self.k_3 * (1 - v_t))
 
