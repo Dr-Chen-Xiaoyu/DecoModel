@@ -9,6 +9,7 @@ from jax import vmap
 from typing import Union,Callable
 from brainpy.types import ArrayType
 
+
 def AbbottChance(inp, a=270, b=108, d=0.154, epsilon=1e-2):
     x=a*inp-b
     out=bm.ifelse( 
@@ -179,6 +180,7 @@ class outLinear(bp.DynamicalSystemNS):
 
     def update(self, inp = 0):
         return bm.multiply(self.a, inp) + self.b
+
 
 class outBalloon(bp.DynamicalSystemNS):
     def __init__(
