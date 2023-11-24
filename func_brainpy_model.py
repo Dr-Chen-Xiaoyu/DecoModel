@@ -9,7 +9,7 @@ from jax import vmap
 from typing import Union,Callable
 from brainpy.types import ArrayType
 
-def AbbottChance(inp, a=270, b=108, d=0.154, epsilon=1e-7):
+def AbbottChance(inp, a=270, b=108, d=0.154, epsilon=1e-2):
     x=a*inp-b
     out=bm.ifelse( 
         bm.abs(x)<=epsilon, 
@@ -43,7 +43,7 @@ class DecoModel(bp.DynamicalSystemNS):
         w: Union[float, ArrayType] = 0.9, # recurrent weights
         I: Union[float, ArrayType] = 0.0, # background inputs (intercepts)
         TrainVar_list = ['G','w','I'],
-        H_x_act: Union[str, Callable] = vmap(vmap(AbbottChance, out_axes=0, in_axes=0), out_axes=0, in_axes=0) # or 'Softplus' or 'AbbottChance' or other callable activation function
+        H_x_act: Union[str, Callable] = vmap(vmap(AbbottChance, out_axes=0, in_axes=0), out_axes=0, in_axes=0) # or other callable activation function or 'Softplus' or 'AbbottChance'
         S_init: Union[float, ArrayType] = None, # initial S
         H_init: Union[float, ArrayType] = None, # initial H (firing rate)
     ):
@@ -185,32 +185,45 @@ class outBalloon(bp.DynamicalSystemNS):
         self,
         size: int,
         batch_size: int = 1,
-        p_constant: float = 0.34,
+        rou: float = 0.34, # ρ = 0.34 is the resting oxygen extraction fraction, the p_constant
+        tau: float = 0.98, # hemodynamic transit time τ = 0.98 s
+        kappa: float = 0.65, # The kinetic parameters rate of signal decay κ
+        gamma: float = 0.41, # rate of elimination
+        alpha: float = 0.32, # Grubb’s exponent
+        v_0: float = 0.02,# resting blood volume fraction
+        B_0: float = 3.0, # B0, which is 3T in the HCP dataset
+        r_0: float = 110, # the intravascular relaxation rate is r0 = 110 Hz
+        e: float = 0.47, # the ratio between intravascular and extravascular MR signal is e = 0.47
+        TE: float = 0.0331, # The echo time TE = 33.1 ms in the HCP dataset
         ):
 
         super(outBalloon, self).__init__()
         '''
-        Output-nonlinear-scalling-layer (Balloon dynamics) of S from RNN-layer DecoModel
-        
-        This function turns postsynaptic gating variable S to BOLD signal in an element-wise fashion.
-        
-        The Balloon-Windkessel Hemodynamic model is used. The equations and parameters are the same as in the paper:
-        https://www.science.org/doi/10.1126/sciadv.aat7854
+        Output-nonlinear-scalling-layer (Balloon dynamics) of S from RNN-layer DecoModel, i.e., turning postsynaptic gating variable S to BOLD signal in an element-wise fashion.
+        Balloon-Windkessel Hemodynamic model is used, equations with default parameters are from https://www.science.org/doi/10.1126/sciadv.aat7854
         
         size = num, i.e., number of network size (# of node)
-
         '''
 
-        self.F_0 = bm.Variable(0*bm.ones((batch_size,size)), batch_axis = 0) 
+        self.rou = rou
+        self.tau = tau
+            
+        self.kappa = kappa
+        self.gamma = gamma
+        self.alpha = alpha
+ 
+        self.v_0 = v_0
+
+        eta_0 = 28.265 * B_0 # ϑ0 = 28.265B0 is the frequency offset at the outer surface of magnetized vessels and depends on the main magnetic field strength B0
+        self.k_1 = 4.3 * eta_0 * rou * TE
+        self.k_2 = e * r_0 * rou * TE
+        self.k_3 = 1-e
+            
+        self.F_0 = bm.Variable(0*bm.ones((batch_size,size)), batch_axis = 0)
         self.F_1 = bm.Variable(1*bm.ones((batch_size,size)), batch_axis = 0) 
         self.F_2 = bm.Variable(1*bm.ones((batch_size,size)), batch_axis = 0) 
         self.F_3 = bm.Variable(1*bm.ones((batch_size,size)), batch_axis = 0) 
 
-        self.p_constant = p_constant
-        self.v_0 = 0.02
-        self.k_1 = 4.3 * 28.265 * 3 * 0.0331 * p_constant
-        self.k_2 = 0.47 * 110 * 0.0331 * p_constant
-        self.k_3 = 0.53
 
     def update(self,S=0):
         '''
@@ -222,21 +235,19 @@ class outBalloon(bp.DynamicalSystemNS):
         '''
                 
         # gating2bold_derivative：
-        dF_0 = S - 0.65 * self.F_0 - 0.41 * (self.F_1 -1)
+        dF_0 = S - self.kappa * self.F_0 - self.gamma * (self.F_1 -1)
         dF_1 = self.F_0
-        dF_2 = 1 / 0.98 * (self.F_1 - self.F_2**3)
-        dF_3 = 1 / 0.98 * (self.F_1 / self.p_constant * (1-(1-self.p_constant)**(1/self.F_1)) - self.F_3 * self.F_2 ** 2)
+        dF_2 = 1 / self.tau * (self.F_1 - self.F_2**(1/self.alpha))
+        dF_3 = 1 / self.tau * (self.F_1 / self.rou * (1-(1-self.rou)**(1/self.F_1)) - self.F_3 * self.F_2 **(1/self.alpha - 1))
 
-        # eular
+        # forward-eular
         self.F_0.value = self.F_0 + dF_0*bm.dt
         self.F_1.value = self.F_1 + dF_1*bm.dt
         self.F_2.value = self.F_2 + dF_2*bm.dt
         self.F_3.value = self.F_3 + dF_3*bm.dt
         
-        # caculate BOLD
+        # caculate and return BOLD signal
         v_t = self.F_2
         q_t = self.F_3
-        
-        S_BOLD = 100 / self.p_constant * self.v_0 * (self.k_1 * (1 - q_t) + self.k_2 * (1 - q_t / v_t) + self.k_3 * (1 - v_t))
-        return S_BOLD
+        return self.v_0 * (self.k_1 * (1 - q_t) + self.k_2 * (1 - q_t / v_t) + self.k_3 * (1 - v_t))
 
